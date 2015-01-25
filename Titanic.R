@@ -40,7 +40,33 @@ View(train)
 
 # using aggregate
 aggregate(Survived ~ Child + Sex, data = train, FUN = sum)
+aggregate(Survived ~ Child + Sex, data = train, FUN = function(x) {sum(x)/length(x)})
 
-# using dplyr pipes
-train %>% group_by(Child, Sex) %>%
-    summarize(counts = sum(Survived))
+# using dplyr
+train %>% 
+    group_by(Child, Sex) %>%
+    summarize(n = n(), counts = sum(Survived)) %>%
+    mutate(prob = counts/n)
+
+# examining fare
+train$Fare2 <- '30+'
+train$Fare2[train$Fare < 30 & train$Fare >= 20] <- '20-30'
+train$Fare2[train$Fare < 20 & train$Fare >= 10] <- '10-20'
+train$Fare2[train$Fare < 10] <- '<10'
+
+train %>% 
+    group_by(Fare2, Pclass, Sex) %>%
+    summarize(n = n(), counts = sum(Survived)) %>%
+    mutate(prob = counts/n)
+
+# main effect of fare
+train %>%
+    group_by(Fare2) %>%
+    summarize(n = n(), counts = sum(Survived)) %>%
+    mutate(prob = counts/n)
+
+test$Survived <- 0
+test$Survived[test$Sex == 'female'] <- 1
+test$Survived[test$Sex == 'female' & test$Pclass == 3 & test$Fare >=20] <- 0
+submit <- data.table(PassengerId = test$PassengerId, Survived = test$Survived)
+write.csv(submit, file = "version3.csv", row.names = FALSE)
