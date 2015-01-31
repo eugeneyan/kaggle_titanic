@@ -70,3 +70,32 @@ test$Survived[test$Sex == 'female'] <- 1
 test$Survived[test$Sex == 'female' & test$Pclass == 3 & test$Fare >=20] <- 0
 submit <- data.table(PassengerId = test$PassengerId, Survived = test$Survived)
 write.csv(submit, file = "version3.csv", row.names = FALSE)
+
+### Decision Trees
+install.packages('C50')
+install.packages('randomForest')
+library(rpart)
+model.DT <- rpart(Survived ~ Pclass + Sex + Age + SibSp + Parch + Fare + Embarked, data = train, method = 'class')
+plot(model.DT)
+text(model.DT)
+
+# for better graphics
+install.packages('rattle')
+install.packages('rpart.plot')
+install.packages('RColorBrewer')
+library(rattle)
+library(rpart.plot)
+library(RColorBrewer)
+
+fancyRpartPlot(model.DT)
+
+prediction <- predict(model.DT, test, type = 'class')
+submit <- data.frame(PassengerId = test$PassengerId, Survived = prediction)
+write.csv(submit, file = 'myfirstdtree.csv', row.names = F)
+
+?rpart.control
+model.DT2 <- rpart(Survived ~ Pclass + Sex + Age + SibSp + Parch + Fare + Embarked, data = train, method = 'class', control = rpart.control(minsplit = 2, cp = 0))  # this leads to overfitting
+fancyRpartPlot(model.DT2)
+
+# manually trim trees
+model.DT3 <- prp(model.DT2, snip = T)$obj
