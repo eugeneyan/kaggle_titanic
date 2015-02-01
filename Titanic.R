@@ -99,3 +99,175 @@ fancyRpartPlot(model.DT2)
 
 # manually trim trees
 model.DT3 <- prp(model.DT2, snip = T)$obj
+
+### Feature Engineering
+str(train)
+str(test)
+test$Survived <- NA
+
+# combine training and testing data
+combi <- rbind_list(train, test)  # coerces factors to char 
+str(combi)
+
+combi$Name[1]
+
+# regular expressions
+strsplit(combi$Name[1], split = '[,.]')
+strsplit(combi$Name[1], split = '[,.]')[[1]]
+
+strsplit(combi$Name[1], split = '[,.]')[[1]][2]
+
+# sapply data cleaning to all Titles
+combi$Title <- sapply(combi$Name, FUN = function(x) {
+  strsplit(x, split = '[,.]')[[1]][2]
+})
+str(combi)  # but there's still a ' ' in front of all the titles
+
+# using dplyr (doesn't work correctly)
+combi$Title <- NA
+str(combi)
+combi <- combi %>%
+  mutate(Title = strsplit(Name, split = '[,.]')[[1]][2])  # doesn't work correctly
+View(combi)
+
+# removing the ' '
+combi$Title <- sub(' ', '', combi$Title)
+View(combi$Title)
+str(combi)
+table(combi$Title)
+
+# combining titles
+combi$Title[combi$Title %in% c('Mme', 'Mlle')] <- 'Mlle'
+
+# using dplyr
+combi <- combi %>%
+  mutate(Title = ifelse(Title == 'Mme', 'Mlle', Title))
+
+combi$Title[combi$Title %in% c('Capt', 'Don', 'Major', 'Jonkheer', 'Sir')] <- 'Sir'
+combi$Title[combi$Title %in% c('Dona', 'Lady', 'the Countess')] <- 'Lady'
+table(combi$Title)
+
+# change title back to factor
+combi$Title <- as.factor(combi$Title)
+str(combi)
+
+# derive FamilySize
+combi <- combi %>%
+  mutate(FamilySize = SibSp + Parch + 1)
+
+# combine surname with familysize
+combi$Surname <- sapply(combi$Name, FUN = function(x) {
+  strsplit(x, split = '[,.]') [[1]][1]
+})
+
+combi$FamilyID <- paste(as.character(combi$FamilySize), combi$Surname, sep = '')
+combi$FamilyID[combi$FamilySize <= 2] <- 'Small'
+table(combi$FamilyID)
+
+famIDs <- data.frame(table(combi$FamilyID))
+famIDs <- famIDs[famIDs$Freq <= 2, ]
+combi$FamilyID[combi$FamilyID %in% famIDs$Var1] <- 'Small'
+combi$FamilyID <- factor(combi$FamilyID)
+
+# split training and test set
+train <- combi[1:891, ]
+test <- combi[892:1309, ]
+
+# create new decision tree
+model <- rpart(Survived ~ Pclass + Sex + Age + SibSp + Parch + Fare + 
+                 Embarked + Title + FamilySize + FamilyID, 
+               data = train, method = 'class')
+fancyRpartPlot(model)
+
+# create submission
+prediction <- predict(model, test, type = 'class')
+submit <- data.frame(PassengerId = test$PassengerId, Survived = prediction)
+write.csv(submit, file = 'myseconddtree.csv', row.names = F)
+
+# create new decision tree (with fewer models)
+model <- rpart(Survived ~ Pclass + Sex + Age + Fare + Title, 
+               data = train, method = 'class')
+fancyRpartPlot(model)
+
+# create submission
+prediction <- predict(model, test, type = 'class')
+submit <- data.frame(PassengerId = test$PassengerId, Survived = prediction)
+write.csv(submit, file = 'mythirddtree.csv', row.names = F)
+
+### Random Forests
+# for random forests, we have to fill in the missing values
+# it can only take in factors up to 32 levels
+install.packages('rondomForest')
+library(randomForest)
+
+# filling in Age
+summary(combi$Age)
+age.avail <- combi[!is.na(combi$Age), ]
+View(combi[!is.na(combi$Age), ])
+model.age <- rpart(Age ~ Pclass + Sex + Fare + Title, 
+               data = age.avail, method = 'anova')
+
+combi$Age[is.na(combi$Age)] <- predict(model.age, combi[is.na(combi$Age), ])
+
+summary(combi)
+
+# filling in Embarked
+i <- which(combi$Embarked == '')
+combi$Embarked[i] <- 'S'
+combi$Embarked <- factor(combi$Embarked)
+summary(combi$Embarked)
+
+# filling in Fare
+combi$Fare[which(is.na(combi$Fare))] <- median(combi$Fare, na.rm = T)
+summary(combi$Fare)
+
+# adjusting the FamilyID
+combi$FamilyID2 <- combi$FamilyID
+combi$FamilyID2 <- as.character(combi$FamilyID2)
+combi$FamilyID2[combi$FamilySize <= 3] <- 'Small'
+combi$FamilyID2 <- factor(combi$FamilyID2)
+combi$Survived <- factor(combi$Survived)
+str(combi)
+
+# split training and test set
+train <- combi[1:891, ]
+test <- combi[892:1309, ]
+
+set.seed(251186)
+model2 <- randomForest(as.factor(Survived) ~ Pclass + Sex + Age + Fare + Title, 
+               data = train, importance = T, ntree = 2000)
+model3 <- randomForest(as.factor(Survived) ~ Pclass + Sex + Age + SibSp + 
+                         Parch + Fare + Embarked + Title + FamilySize +
+                         FamilyID2, data = train, importance = T, ntree = 2000)
+
+# check importance of variables
+varImpPlot(model2)
+varImpPlot(model3)
+
+# create submission
+prediction <- predict(model2, test, type = 'class')
+submit <- data.frame(PassengerId = test$PassengerId, Survived = prediction)
+write.csv(submit, file = 'rforest1.csv', row.names = F)
+
+prediction <- predict(model3, test, type = 'class')
+submit <- data.frame(PassengerId = test$PassengerId, Survived = prediction)
+write.csv(submit, file = 'rforest2.csv', row.names = F)
+
+# forest of conditional inference trees
+install.packages('party')
+library(party)
+
+set.seed(415)
+model4 <- cforest(as.factor(Survived) ~ Pclass + Sex + Age + Fare + Title, 
+           data = train, controls = cforest_unbiased(ntree=2000, mtry=3))
+prediction <- predict(model4, test, OOB = T, type = 'response')
+submit <- data.frame(PassengerId = test$PassengerId, Survived = prediction)
+write.csv(submit, file = 'cforest1.csv', row.names = F)
+
+model5 <- cforest(as.factor(Survived) ~ Pclass + Sex + Age + SibSp + Parch +
+                    Fare + Embarked + Title + FamilySize + FamilyID, 
+                  data = train, controls = cforest_unbiased(ntree = 2000, 
+                                                            mtry = 3))
+prediction <- predict(model5, test, OOB = T, type = 'response')
+submit <- data.frame(PassengerId = test$PassengerId, Survived = prediction)
+write.csv(submit, file = 'cforest3.csv', row.names = F)
